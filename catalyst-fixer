@@ -1,0 +1,32 @@
+#!/bin/sh
+set -e
+CAT_PATH=$1
+NEW_CAT_PATH=$2
+LAST_REV=$(svnlook youngest $CAT_PATH)
+[[ -e $NEW_CAT_PATH ]] || svnadmin create $NEW_CAT_PATH
+FULL_CAT_PATH=$(cd $CAT_PATH; pwd)
+
+(
+  svnadmin dump $CAT_PATH               -r    0:5068
+  svnadmin dump $CAT_PATH --incremental -r 5069:5075 | svndumpfilter include nonexistant
+  svnadmin dump $CAT_PATH --incremental -r 5076:5077
+  svnadmin dump $CAT_PATH --incremental -r 5078:5081 | svndumpfilter include nonexistant
+  svnadmin dump $CAT_PATH --incremental -r 5082:$LAST_REV | perl -lne'
+    if (/^Node-copyfrom-rev: 5080$/) {
+      my $next = <>;
+      chomp $next;
+      if ($next =~ /^Node-copyfrom-path: (.*)$/) {
+        if (`svn info file://'$FULL_CAT_PATH'/$1\@5068` =~ /^Last Changed Rev: (\d+)$/m) {
+          $_ = "Node-copyfrom-rev: $1";
+        }
+      }
+      print;
+      print $next;
+    }
+    else {
+      print;
+    }
+  '
+) | svnadmin load -q $NEW_CAT_PATH
+
+

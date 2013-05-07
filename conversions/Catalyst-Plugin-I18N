@@ -1,0 +1,7 @@
+{
+  "svn_url" : "catalyst/Catalyst-Plugin-I18N",
+  "tag_roots" : "tags",
+  "trunk" : "trunk",
+  "authors" : "shadowcat",
+  "talisman" : "lib/Catalyst/Plugin/I18N.pm"
+}
