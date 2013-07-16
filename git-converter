@@ -825,17 +825,6 @@ sub cmd_make_ignores {
   }
 }
 
-sub cmd_author_generate {
-  my ($class, $user) = shift;
-  my $author = "$user <$user\@svn-converter>";
-  my $repo = Cwd::cwd();
-  my $c = SVN::Converter->new(repo => $repo);
-  open my $fh, '>>', $c->authors_file;
-  print { $fh } "$author\n";
-  close $fh;
-  print $author . "\n";
-}
-
 sub cmd_calculate_author {
   my ($class, $repo) = @_;
   my $commit = $ENV{GIT_COMMIT};
