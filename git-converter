@@ -69,9 +69,13 @@ my $root = dirname($script);
   } );
   has git => (is => 'lazy', default => sub {
     my $repo = $_[0]->repo;
+    my $need_init = !-e $repo;
     mkdir $repo
-      unless -e $repo;
-    Git::Wrapper->new($repo);
+      if $need_init;
+    my $git = Git::Wrapper->new($repo);
+    $git->init
+      if $need_init;
+    $git;
   });
   sub config {
     my ($self, $entry) = @_;
