@@ -352,7 +352,7 @@ END_SCRIPT
     my ($self, $name, $email) = @_;
     open my $fh, '<', $self->authors_file;
     while (my $line = <$fh>) {
-      if ( $line =~ /(\w+)\s*=\s*(.*?)\s*<([^>]+)>/ ) {
+      if ( $line =~ /(\S+)\s*=\s*(.*?)\s*<([^>]+)>/ ) {
         if ($1 eq $name) {
           return ("$2", "$3");
         }
@@ -844,11 +844,10 @@ sub cmd_calculate_author {
   if ("$name <$email>" eq "$name <$name\@svn-converter>") {
     my $c = SVN::Converter->new(repo => $repo);
     ($name, $email) = $c->fix_author($name, $email);
-    print "export GIT_AUTHOR_NAME=$name\n";
-    print "export GIT_AUTHOR_EMAIL=$email\n";
-    print "export GIT_COMMITTER_NAME=$name\n";
-    print "export GIT_COMMITTER_EMAIL=$email\n";
-
+    print "export GIT_AUTHOR_NAME='$name'\n";
+    print "export GIT_AUTHOR_EMAIL='$email'\n";
+    print "export GIT_COMMITTER_NAME='$name'\n";
+    print "export GIT_COMMITTER_EMAIL='$email'\n";
   }
 }
 
