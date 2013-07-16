@@ -570,10 +570,10 @@ END_SCRIPT
     my @refs = @{ $self->refs };
     chdir $repo;
     system 'git', 'filter-branch',
-      "--tree-filter"     => "$script make-ignores",
+      "--tree-filter"     => "$script make-ignores " . $self->repo,
       "--tag-name-filter" => "cat",
-      "--msg-filter"      => "$script msg-filter",
-      "--env-filter"      => "eval \$($script calculate-author)",
+      "--msg-filter"      => "$script msg-filter " . $self->repo,
+      "--env-filter"      => "eval \$($script calculate-author @{[ $self->repo ]})",
       "--prune-empty",
       "--force",
       "--", @refs,
@@ -770,15 +770,25 @@ sub cmd_push {
   system 'git', 'push', $url, @spec;
 }
 
+sub cmd_archive {
+  my ($class, $file) = @_;
+  my $c = SVN::Converter->new(repo => $file);
+  mkdir 'archive';
+  my $name = $c->name.'.git';
+  system 'git', 'init', '--bare', "archive/$name";
+  my $url = realpath("archive/$name");
+  $class->cmd_push($file, $url);
+  local $CWD = 'archive';
+  system 'tar', 'czf', "$name.tar.gz", $name;
+  system 'rm', '-rf', $name;
+}
+
 sub cmd_make_ignores {
-  my ($class) = @_;
+  my ($class, $repo) = @_;
   my $commit = $ENV{GIT_COMMIT};
   if (-e '.gitignore') {
     return;
   }
-
-  my $repo = `git rev-parse --show-toplevel`;
-  chomp $repo;
 
   my $git = Git::Wrapper->new($repo);
   my ($svn_url) = $git->config('svn-remote.svn.url');
@@ -826,13 +836,12 @@ sub cmd_author_generate {
 }
 
 sub cmd_calculate_author {
-  my ($class) = @_;
+  my ($class, $repo) = @_;
   my $commit = $ENV{GIT_COMMIT};
   my $name = $ENV{GIT_AUTHOR_NAME};
   my $email = $ENV{GIT_AUTHOR_EMAIL};
 
   if ("$name <$email>" eq "$name <$name\@svn-converter>") {
-    my $repo = Cwd::cwd();
     my $c = SVN::Converter->new(repo => $repo);
     ($name, $email) = $c->fix_author($name, $email);
     print "export GIT_AUTHOR_NAME=$name\n";
@@ -844,11 +853,10 @@ sub cmd_calculate_author {
 }
 
 sub cmd_msg_filter {
-  my ($class) = shift;
+  my ($class, $repo) = @_;
   my $message = do { local $/; <STDIN> };
   print $message;
   my $commit = $ENV{GIT_COMMIT};
-  my $repo = Cwd::cwd();
   my $c = SVN::Converter->new(repo => $repo);
   print $c->filter_message($commit, $message);
 }
