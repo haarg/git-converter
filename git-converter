@@ -774,7 +774,6 @@ sub cmd_push {
 sub cmd_archive {
   my ($class, $file) = @_;
   my $c = SVN::Converter->new(repo => $file);
-  mkdir 'archive';
   my $name = $c->name.'.git';
   system 'git', 'init', '--bare', "archive/$name";
   my $url = realpath("archive/$name");
