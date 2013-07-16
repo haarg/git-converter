@@ -1,0 +1,24 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+
+my %mapping = (
+);
+open my $fh, '-|:gzip', 'curl', '-s', 'http://cpan.metacpan.org/authors/01mailrc.txt.gz';
+while (my $line = <$fh>) {
+  chomp $line;
+  my ($id, $name, $email) = $line =~ /^alias (\S+)\s+"([^<>]*) <(.+)>"$/
+    or die "waaaaaa $line";
+
+  my $cpan_email = lc $id . '@cpan.org';
+  if ($mapping{$id}) {
+    $email = $mapping{$id};
+  }
+  elsif ($email eq 'CENSORED') {
+    $email = $cpan_email;
+  }
+  elsif ($email !~ /@/ || $email =~ / /) {
+    $email = $cpan_email;
+  }
+  print "$cpan_email = $name <$email>\n";
+}
