@@ -585,6 +585,7 @@ END_SCRIPT
     if ($self->simplified_merges->{$commit}) {
       $message = '';
     }
+    $message =~ s/^git-svn-id: .*\n?//m;
     $message =~ s/\A\s*-\s*([^\n]+)\n*\z/$1/ms;
     my $git = $self->git;
     my ( $to, @from ) = split /\s+/, ($git->show({ s => 1, format => '%P' }, $commit))[0];
@@ -854,7 +855,6 @@ sub cmd_calculate_author {
 sub cmd_msg_filter {
   my ($class, $repo) = @_;
   my $message = do { local $/; <STDIN> };
-  print $message;
   my $commit = $ENV{GIT_COMMIT};
   my $c = SVN::Converter->new(repo => $repo);
   print $c->filter_message($commit, $message);
