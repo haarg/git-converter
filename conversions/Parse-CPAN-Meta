@@ -1,0 +1,6 @@
+{
+  "svn_url" : "http://svn.ali.as/cpan/",
+  "trunk" : "trunk/Parse-CPAN-Meta",
+  "authors" : "alias",
+  "talisman" : "lib/Parse/CPAN/Meta.pm"
+}
