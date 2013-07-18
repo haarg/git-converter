@@ -723,7 +723,7 @@ END_SCRIPT
   }
 
   sub format_branch {
-    my ($self, $commit) = shift;
+    my ($self, $commit) = @_;
     my $git = $self->git;
     my ($svn_id) = git_svn_id($git->show({s => 1, format => '%s%n%n%b'}, $commit));
     my $svn_url = $self->svn_url;
