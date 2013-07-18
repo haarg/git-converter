@@ -1,0 +1,22 @@
+use strictures;
+
+die "need repo and talisman file" unless @ARGV == 2;
+my ($repo, $talisman) = @ARGV;
+
+my %files;
+my $last_rev = `svnlook youngest $repo`;
+chomp $last_rev;
+for my $rev (1..$last_rev) {
+  my @paths = `svnlook tree --full-paths -r $rev $repo`;
+  chomp @paths;
+  @files{@paths} = ();
+}
+
+my %branches;
+for my $file (keys %files) {
+  if ($file =~ s{/\Q$talisman\E$}{}) {
+    $branches{$file}++;
+  }
+}
+
+print "$_\n" for sort keys %branches;
