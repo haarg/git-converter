@@ -4,11 +4,10 @@ use warnings;
 
 my %mapping = (
 );
-open my $fh, '-|:gzip', 'curl', '-s', 'http://cpan.metacpan.org/authors/01mailrc.txt.gz';
+open my $fh, '-|:gzip', 'curl', '-s', 'http://cpan.metacpan.org/authors/02authors.txt.gz';
 while (my $line = <$fh>) {
   chomp $line;
-  my ($id, $name, $email) = $line =~ /^alias (\S+)\s+"([^<>]*) <(.+)>"$/
-    or die "waaaaaa $line";
+  my ($id, $email, $name, $web) = split /\t/, $line;
 
   my $cpan_email = lc $id . '@cpan.org';
   if ($mapping{$id}) {
