@@ -36,19 +36,26 @@ my $root = dirname($script);
     die "bad file: $_[0]\n";
   }
 
-  has name => (is => 'lazy', default => sub { $_[0]->config('name') } );
-  has talisman => ( is => 'lazy', default => sub { $_[0]->config('talisman') } );
-  has tag_prefix => ( is => 'lazy', default => sub { $_[0]->config('tag_prefix') } );
-  has authors => (is => 'lazy', default => sub { $_[0]->config('authors') } );
-
-  has trunk => ( is => 'lazy', default => sub { $_[0]->config('trunk') } );
-  for my $type (qw(branch tag)) {
-    has "${type}_roots" => (
+  for my $attr (qw(
+    name talisman tag_prefix authors trunk
+  )) {
+    has $attr => (
       is => 'lazy',
-      coerce => sub { ref $_[0] ? $_[0] : [ $_[0] ] },
-      default => sub { $_[0]->config("${type}_roots") },
+      default => sub { $_[0]->config($attr) },
     );
   }
+
+  for my $attr (qw(branch_roots tag_roots graft_revs extra_refs)) {
+    has $attr => (
+      is => 'lazy',
+      coerce => sub { ref $_[0] ? $_[0] : [ $_[0] ] },
+      default => sub { $_[0]->config($attr) },
+    );
+  }
+
+  has "branch_map" => (
+    is => 'lazy',
+  );
 
   has svn_url => (is => 'lazy', default => sub { $_[0]->config('svn_url') }, coerce => sub {
     my $url = shift;
@@ -88,7 +95,9 @@ my $root = dirname($script);
   sub save_config {
     my $self = shift;
     my $git = $self->git;
-    for my $attr (qw(repo tag_roots branch_roots trunk authors talisman tag_prefix svn_url name)) {
+    for my $attr (qw(
+      repo tag_roots branch_roots trunk authors talisman tag_prefix svn_url name graft_revs extra_refs
+    )) {
       my $value = $self->$attr;
       my $entry = $attr;
       $entry =~ s/_/-/g;
@@ -196,8 +205,12 @@ END_SCRIPT
     $git->config('svn.authorsfile', $self->authors_file);
     $git->config('svn.preserve-empty-dirs', 'true');
     $git->config('svn.placeholder-filename', '.gitignore');
+    if (my $branches = $self->branch_map) {
+      for my $branch (sort keys %$branches) {
+        $git->config({add => 1}, 'svn-remote.svn.fetch', "$branch:$branches->{$branch}");
+      }
+    }
   }
-
 
   sub svn_info {
     my $url = shift;
@@ -242,10 +255,46 @@ END_SCRIPT
     return [ $self->git->for_each_ref({format=>'%(refname)'}, 'refs/heads/convert', 'refs/tags/convert/') ];
   }
 
+  sub rev_to_commit {
+    my ($self, $rev) = @_;
+    $rev =~ s/^r//;
+    my $git = $self->git;
+    my ($commit) = $git->RUN('log', {format => '%H', grep => "git-svn-id:.*\@$rev "}, '-n', 1, @{$self->refs});
+    return $commit
+      if $commit;
+    return;
+  }
+
+  sub commit_to_filtered {
+    my ($self, $commit) = @_;
+    return
+      unless $commit;
+    open my $fh, '<', $self->repo . '/.git/filter-map'
+      or return $commit;
+    while (my $line = <$fh>) {
+      chomp $line;
+      my ($orig, $filtered) = split /\s+/, $line;
+      return $filtered
+        if $orig eq $commit;
+    }
+    return $commit;
+  }
+
+  sub abbrev_commit {
+    my ($self, $commit) = @_;
+    return
+      unless $commit;
+    my ($abbrev) = $self->git->rev_parse({short => 1}, $commit);
+    $abbrev;
+  }
+
   sub convert_refs {
     my $self = shift;
 
     my $git = $self->git;
+    $git->update_ref('-d', $_)
+      for $git->for_each_ref({format=>'%(refname)'}, 'refs/heads/convert/');
+
     my @refs = $git->for_each_ref({format=>'%(refname)'}, 'refs/remotes/svn/');
     for my $ref (@refs) {
       (my $bare = $ref) =~ s{^refs/remotes/svn/}{};
@@ -261,6 +310,11 @@ END_SCRIPT
         $bare = 'master';
       }
       $git->update_ref("refs/heads/convert/$bare", $ref);
+    }
+    for my $extra ( @{$self->extra_refs} ) {
+      my ($ref, $rev) = split /:/, $extra;
+      my $commit = $self->rev_to_commit($rev);
+      $git->update_ref("refs/heads/convert/$ref", $commit);
     }
   }
 
@@ -430,7 +484,7 @@ END_SCRIPT
   sub merges {
     my $self = shift;
     return [
-      map { split / / }
+      map { [split / /] }
       $self->git->RUN('log', { merges => 1, format => '%H %P' }, @{$self->refs})
     ];
   }
@@ -499,18 +553,57 @@ END_SCRIPT
     $self->add_simplified_merges(\%altered);
   }
 
+  my $empty_tree = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+  sub graft_remerges {
+    my $self = shift;
+    my $git = $self->git;
+
+    my $grafts = $self->grafts;
+    for my $merge ( @{ $self->merges } ) {
+      my ($commit, @parents) = @$merge;
+      my $base_tree = $empty_tree;
+      eval {
+        my ($base) = $self->git->merge_base(@parents);
+        ($base_tree) = $self->git->rev_parse("$base^{tree}");
+      };
+      my @new_parents = grep {
+        my ($parent_tree) = $git->rev_parse("$_^{tree}");
+        $parent_tree eq $base_tree ? () : $_;
+      } @parents;
+      if (@new_parents != @parents) {
+        $grafts->{$commit} = \@new_parents;
+      }
+    }
+    $self->save_grafts;
+  }
+
+  sub graft_revisions {
+    my $self = shift;
+    my $git = $self->git;
+
+    my $grafts = $self->grafts;
+    for my $graft (@{$self->graft_revs}) {
+      my ($commit, @parents) = map {
+        $self->rev_to_commit($_) || do { warn "can't find $_"; next }
+      } split /:/, $graft;
+      $grafts->{$commit} = \@parents;
+    }
+    $self->save_grafts;
+  }
+
   sub delete_merged_branches {
     my $self = shift;
     my $git = $self->git;
-    my @branches = @{ $self->branches };
+    my @branches = grep { $_ ne 'refs/heads/convert/master' } @{ $self->branches };
+    my @refs = @{ $self->refs };
     my %remove;
-    CHILD: for my $child ( grep { $_ ne 'refs/heads/convert/master' } @branches ) {
-      for my $branch ( @{ $self->refs } ) {
+    CHILD: for my $child ( @branches ) {
+      for my $branch ( @refs ) {
+        next if $child eq $branch;
         eval {
           $git->merge_base({is_ancestor => 1}, $child, $branch);
-          $remove{$child}++;
-          next CHILD;
-        };
+          ++$remove{$child};
+        } and next CHILD;
       }
     }
     for my $branch ( keys %remove ) {
@@ -522,12 +615,17 @@ END_SCRIPT
     my $self = shift;
     my $git = $self->git;
     my @branches = grep { $_ ne 'refs/heads/convert/master' } @{ $self->branches };
+    my @refs = @{ $self->refs };
     my %remove;
     CHILD: for my $child ( @branches ) {
-      BRANCH: for my $branch ( @{ $self->refs } ) {
+      BRANCH: for my $branch ( @refs ) {
+        next if $child eq $branch;
+        my $base;
         eval {
-          my ($base) = $git->merge_base($child, $branch);
-          my @trees = $git->RUN('log', {format => '%H'}, "$base..$child");
+          ($base) = $git->merge_base($child, $branch);
+        };
+        if ($base) {
+          my @trees = $git->RUN('log', {format => '%T'}, "$base..$child");
           my ($base_tree) = $git->rev_parse("$base^{tree}");
           for my $tree (@trees) {
             if ($base_tree ne $tree) {
@@ -536,7 +634,7 @@ END_SCRIPT
           }
           $remove{$child}++;
           next CHILD;
-        };
+        }
       }
     }
     for my $branch ( keys %remove ) {
@@ -574,7 +672,7 @@ END_SCRIPT
       "--tag-name-filter" => "cat",
       "--msg-filter"      => "$script msg-filter " . $self->repo,
       "--env-filter"      => "eval \$($script calculate-author @{[ $self->repo ]})",
-      "--prune-empty",
+      "--commit-filter"   => 'echo $GIT_COMMIT $(git_commit_non_empty_tree "$@") >> ' . $self->repo.'/.git/filter-map',
       "--force",
       "--", @refs,
     ;
@@ -587,8 +685,23 @@ END_SCRIPT
     }
     $message =~ s/^git-svn-id: .*\n?//m;
     $message =~ s/\A\s*-\s*([^\n]+)\n*\z/$1/ms;
+    $message =~ s{\b((r\d+)(?::(\d+)))\b}{
+      my $sha = $self->abbrev_commit($self->commit_to_filtered($self->rev_to_commit($2)));
+      my $out = $1;
+      if ($sha && $3) {
+        my $sha2 = $self->abbrev_commit($self->commit_to_filtered($self->rev_to_commit($3)));
+        if ($sha2) {
+          $out = "$sha..$sha2";
+        }
+      }
+      elsif ($sha) {
+        $out = $sha;
+      }
+      $out;
+    }ge;
     my $git = $self->git;
     my ( $to, @from ) = split /\s+/, ($git->show({ s => 1, format => '%P' }, $commit))[0];
+    $message =~ s/\s+\z/\n/;
 
     if ( @from ) {
       # print the original message
@@ -697,6 +810,8 @@ sub cmd_convert {
   my $c = SVN::Converter->new(repo => $file);
   $c->convert_refs;
   $c->convert_tags;
+  $c->graft_remerges;
+  $c->graft_revisions;
   $c->graft_svk_merges;
   $c->graft_simplified_merges;
   $c->graft_redundant_merges;
@@ -729,6 +844,18 @@ sub cmd_redundant_merges {
   my ($class, $file) = @_;
   my $c = SVN::Converter->new(repo => $file);
   $c->graft_redundant_merges;
+}
+
+sub cmd_remerges {
+  my ($class, $file) = @_;
+  my $c = SVN::Converter->new(repo => $file);
+  $c->graft_remerges;
+}
+
+sub cmd_graft_revisions {
+  my ($class, $file) = @_;
+  my $c = SVN::Converter->new(repo => $file);
+  $c->graft_revisions;
 }
 
 sub cmd_delete_merged {
