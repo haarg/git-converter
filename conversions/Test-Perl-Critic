@@ -1,0 +1,26 @@
+[svn-converter]
+  svn-url = perlcritic
+  authors = perlcritic
+  trunk = trunk/distributions/Test-Perl-Critic
+  talisman = lib/Test/Perl/Critic.pm
+
+  branch-map = fix-utils-pod-t:branches/fix-utils-pod-t/distributions/Test-Perl-Critic
+  branch-map = heredoc-regex-fix:branches/heredoc-regex-fix/distributions/Test-Perl-Critic
+  branch-map = jeff:branches/jeff/Test-Perl-Critic
+  branch-map = rob:branches/rob/distributions/Test-Perl-Critic
+  branch-map = rt38530:branches/rt38530/distributions/Test-Perl-Critic
+  branch-map = rt41443:branches/rt41443/distributions/Test-Perl-Critic
+  branch-map = rt42384:branches/rt42384/trunk/distributions/Test-Perl-Critic
+  branch-map = rt42458:branches/rt42458/distributions/Test-Perl-Critic
+  branch-map = expose-critic-object:branches/tpc_expose_critic_object_to_tests/distributions/Test-Perl-Critic
+
+  tag-map = v0.07:tags/Test-Perl-Critic-0.07
+  tag-map = v0.08:tags/Test-Perl-Critic-0.08
+  tag-map = v1.01:tags/Test-Perl-Critic-1.01
+  tag-map = v1.02:tags/Test-Perl-Critic-1.02
+
+  graft-revs = r23:r17
+  graft-revs = r816:r815
+  graft-revs = r1183:r1182
+
+

@@ -1,0 +1,9 @@
+[svn-converter]
+  svn-url = catalyst
+  authors = catalyst
+  trunk = Catalyst-Plugin-Session-Store-DBIC/trunk
+  talisman = lib/Catalyst/Plugin/Session/Store/DBIC.pm
+
+
+  tag-roots = Catalyst-Plugin-Session-Store-DBIC/tags
+

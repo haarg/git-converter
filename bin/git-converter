@@ -1,0 +1,192 @@
+#!/usr/bin/env perl
+use strictures 1;
+use File::Basename qw(dirname);
+use Cwd qw(realpath);
+my $lib_path;
+BEGIN {
+  $lib_path = realpath(dirname(__FILE__) . '/../lib');
+  $ENV{PERL5LIB} = join(':', $lib_path, $ENV{PERL5LIB} || ());
+}
+use lib $lib_path;
+
+use SVN::GitConverter;
+use autodie ':all';
+use File::chdir;
+
+__PACKAGE__->run(@ARGV);
+exit;
+
+sub run {
+  my $class = shift;
+  my $command = shift || die "no command";
+  my $method = "cmd_$command";
+  $method =~ s/-/_/g;
+  die "invalid command $command"
+    unless $class->can($method);
+  $class->$method(@_);
+}
+
+sub cmd_mirror {
+  my ($class, $mirror_name, $svn_url) = @_;
+  die "no mirror name given"
+    unless $mirror_name;
+  my $svn_mirror = File::Spec->catdir('mirrors', $mirror_name);
+  my $svn_mirror_url = 'file://' . realpath($svn_mirror);
+  my %remote_info;
+  if ($svn_url) {
+    %remote_info = SVN::GitConverter::svn_info($svn_url);
+    $svn_url = $remote_info{'Repository Root'};
+  }
+  if (-e $svn_mirror) {
+    my $current_url = `svn propget --revprop -r 0 svn:sync-from-url $svn_mirror_url`;
+    chomp $current_url;
+    if ($current_url) {
+      if ($current_url ne $svn_url) {
+        print "updating url\n";
+        system "svn propset --revprop -r 0 svn:sync-from-url $svn_url $svn_mirror_url";
+      }
+    }
+    elsif (!$svn_url) {
+      die "mirror exists but not set for sync";
+    }
+  }
+  elsif ($svn_url) {
+    system 'svnadmin', 'create', $svn_mirror;
+    {
+      open my $fh, '>', "$svn_mirror/hooks/pre-revprop-change" or die "$!";
+      print { $fh } "#!/bin/sh\n";
+      close $fh;
+      chmod 0755, "$svn_mirror/hooks/pre-revprop-change";
+    }
+    system 'svnadmin', 'setuuid', $svn_mirror, $remote_info{'Repository UUID'};
+    system 'svnsync', 'init', $svn_mirror_url, $svn_url;
+  }
+  else {
+    die "mirror doesn't exist and no svn url given\n";
+  }
+  system 'svnsync', '--non-interactive', 'sync', $svn_mirror_url;
+}
+
+sub cmd_init {
+  my ($class, $repo, $file) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  $c->init($file);
+}
+
+sub cmd_update {
+  my ($class, $repo) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  $c->update;
+}
+
+sub cmd_cleanup {
+  my ($class, $repo) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  $c->cleanup;
+}
+
+sub cmd_convert {
+  my ($class, $repo) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  $c->cleanup;
+  $c->convert_refs;
+  $c->convert_tags;
+  $c->graft_remerges;
+  $c->graft_revisions;
+  $c->graft_svk_merges;
+  $c->graft_simplified_merges;
+  $c->graft_redundant_merges;
+  $c->delete_merged_branches;
+  $c->delete_empty_branches;
+}
+
+sub cmd_convert_refs {
+  my ($class, $repo) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  $c->cleanup;
+  $c->convert_refs;
+  $c->convert_tags;
+}
+
+sub cmd_svk_merges {
+  my ($class, $repo) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  $c->graft_svk_merges;
+}
+
+sub cmd_simplified_merges {
+  my ($class, $repo) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  $c->graft_simplified_merges;
+}
+
+sub cmd_redundant_merges {
+  my ($class, $repo) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  $c->graft_redundant_merges;
+}
+
+sub cmd_remerges {
+  my ($class, $repo) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  $c->graft_remerges;
+}
+
+sub cmd_graft_revisions {
+  my ($class, $repo) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  $c->graft_revisions;
+}
+
+sub cmd_delete_merged {
+  my ($class, $repo) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  $c->delete_merged_branches;
+}
+
+sub cmd_delete_empty {
+  my ($class, $repo) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  $c->delete_empty_branches;
+}
+
+sub cmd_move_tag {
+  my ($class, $repo, $tag, $ref) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  $c->move_tag($tag, $ref);
+}
+
+sub cmd_bake {
+  my ($class, $repo) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  $c->bake;
+  #$c->fix_tags;
+}
+
+sub cmd_fix_tags {
+  my ($class, $repo) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  $c->fix_tags;
+}
+
+sub cmd_push {
+  my ($class, $repo, $url) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  my $refs = $c->refs;
+  my @spec = map { my $r = $_; $r =~ s{^refs/(heads|tags)/convert/}{refs/$1/}; "$_:$r" } @$refs;
+  local $CWD = $c->repo;
+  system 'git', 'push', $url, @spec;
+}
+
+sub cmd_archive {
+  my ($class, $repo) = @_;
+  my $c = SVN::GitConverter->new(repo => $repo);
+  my $name = $c->name.'.git';
+  system 'git', 'init', '--bare', "archive/$name";
+  my $url = realpath("archive/$name");
+  $class->cmd_push($repo, $url);
+  local $CWD = 'archive';
+  system 'tar', 'czf', "$name.tar.gz", $name;
+  system 'rm', '-rf', $name;
+}
+

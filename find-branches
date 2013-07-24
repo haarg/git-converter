@@ -1,3 +1,4 @@
+#!/usr/bin/env perl
 use strictures;
 
 die "need repo and talisman file" unless @ARGV == 2;
